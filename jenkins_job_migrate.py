@@ -46,15 +46,15 @@ for job in all_jobs:
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
             'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
                   'name'] + "&mode=com.cloudbees.hudson.plugins.folder.Folder -H 'Content-Type: application/json'"
-        # os.popen(cmd)
         print(cmd)
+        #os.popen(cmd)
     else:
         get_config_cmd = "curl -s -k -u " + os.environ["JENKINS_SRC_UNAME"].strip() + ":" + os.environ[
-            "JENKINS_SRC_PASS"].strip() + "  " + url + "config.xml " + " -o config.xml"
-        # out = os.popen(get_config_cmd)
+            "JENKINS_SRC_PASS"].strip() + "  " + job['url'] + "config.xml " + " -o config.xml"
         print(get_config_cmd)
+        # out = os.popen(get_config_cmd)
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
             'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
                   'name'] + " --header Content-Type: 'application/xml' -d @config.xml"
-        # os.popen(cmd)
         print(cmd)
+        # os.popen(cmd)
