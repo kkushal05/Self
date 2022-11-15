@@ -1,6 +1,5 @@
 import json
 import os
-from urllib3 import urlparse
 
 '''
 Environment vairables
@@ -34,8 +33,21 @@ get_jobs(os.environ['JENKINS_SRC_URL'] + "/api/json")
 print(len(all_jobs))
 
 for job in all_jobs:
-    path = urlparse.urlparse(job['url']).path
-if job['_class'] == "com.cloudbees.hudson.plugins.folder.Folder":
-    cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
-        'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
-              'name'] + "&mode=com.cloudbees.hudson.plugins.folder.Folder _H Content-Type: application/json"
+
+    path = job['url']
+    path = path.replace("https://optumpixel-jenkins.optum.com", "")
+
+    if job['_class'] == "com.cloudbees.hudson.plugins.folder.Folder":
+        cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
+                  'name'] + "&mode=com.cloudbees.hudson.plugins.folder.Folder -H 'Content-Type: application/json'"
+        print(cmd)
+    else:
+        get_config_cmd = "curl -s -k -u " + os.environ["JENKINS_SRC_UNAME"].strip() + ":" + os.environ[
+            "JENKINS_SRC_PASS"].strip() + "  " + job['url'] + "/config.xml -o config.xml"
+        out = os.popen(get_config_cmd)
+        cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
+                  'name'] + " --header Content-Type: 'application/xml' -d @config.xml"
+        # os.popen(cmd)
+        print(cmd)
