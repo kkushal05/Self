@@ -3,6 +3,18 @@ import sys
 import json
 import requests
 
+'''
+Environment vairables
+
+export JENKINS_SRC_URL=
+export JENKINS_SRC_UNAME=
+export JENKINS_SRC_PASS=
+export JENKINS_DST_URL=
+export JENKINS_DST_UNAME=
+export JENKINS_DST_PASS
+
+'''
+
 all_jobs=[]
 
 def get_jobs(url):
