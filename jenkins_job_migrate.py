@@ -1,5 +1,6 @@
 import json
 import os
+from requests.utils import quote
 
 '''
 Environment vairables
@@ -18,7 +19,7 @@ all_jobs = []
 
 def get_jobs(url):
     get_jobs_cmd = "curl -s -k -u " + os.environ["JENKINS_SRC_UNAME"].strip() + ":" + os.environ[
-        "JENKINS_SRC_PASS"].strip() + " " + url
+        "JENKINS_SRC_PASS"].strip() + " " + quote(url)
     out = os.popen(get_jobs_cmd)
     src_jobs = json.loads(out.read())
     out.close()
@@ -44,17 +45,17 @@ for job in all_jobs:
 
     if job['_class'] == "com.cloudbees.hudson.plugins.folder.Folder":
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
-            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
-                  'name'] + "&mode=com.cloudbees.hudson.plugins.folder.Folder -H 'Content-Type: application/json'"
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + quote(path + "/createItem?name=" + job[
+            'name']) + "&mode=com.cloudbees.hudson.plugins.folder.Folder -H 'Content-Type: application/json'"
         print(cmd)
-        #os.popen(cmd)
+        # os.popen(cmd)
     else:
         get_config_cmd = "curl -s -k -u " + os.environ["JENKINS_SRC_UNAME"].strip() + ":" + os.environ[
-            "JENKINS_SRC_PASS"].strip() + "  " + job['url'] + "config.xml " + " -o config.xml"
+            "JENKINS_SRC_PASS"].strip() + "  " + quote(job['url'] + "config.xml ") + " -o config.xml"
         print(get_config_cmd)
         # out = os.popen(get_config_cmd)
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
-            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
-                  'name'] + " --header Content-Type: 'application/xml' -d @config.xml"
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + quote(path + "/createItem?name=" + job[
+            'name']) + " --header Content-Type: 'application/xml' -d @config.xml"
         print(cmd)
         # os.popen(cmd)
