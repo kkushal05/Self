@@ -36,22 +36,25 @@ for job in all_jobs:
 
     url = job['url']
     path = url.replace(os.environ['JENKINS_DST_URL'], "")
-    path if path.endswith('/') else path = path + '/'
+
+    if path.startswith('/'):
+        path = path[1:]
+    if path.endswith('/'):
+        path = path[:-1]
 
     if job['_class'] == "com.cloudbees.hudson.plugins.folder.Folder":
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
-            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "createItem?name=" + job[
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
                   'name'] + "&mode=com.cloudbees.hudson.plugins.folder.Folder -H 'Content-Type: application/json'"
         # os.popen(cmd)
         print(cmd)
     else:
-        url if url.endswith('/') else url = url + '/'
         get_config_cmd = "curl -s -k -u " + os.environ["JENKINS_SRC_UNAME"].strip() + ":" + os.environ[
             "JENKINS_SRC_PASS"].strip() + "  " + url + "config.xml " + " -o config.xml"
         # out = os.popen(get_config_cmd)
         print(get_config_cmd)
         cmd = "curl -k -X POST -u " + os.environ['JENKINS_DST_UNAME'].strip() + ":" + os.environ[
-            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "createItem?name=" + job[
+            'JENKINS_DST_PASS'].strip() + " " + os.environ['JENKINS_DST_URL'] + path + "/createItem?name=" + job[
                   'name'] + " --header Content-Type: 'application/xml' -d @config.xml"
         # os.popen(cmd)
         print(cmd)
