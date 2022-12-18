@@ -1,0 +1,13 @@
+Modifying MySQL DB in Live production environment with downtime
+Take DB backup
+Block access to DB
+Connect to Database using mySQL client 
+Perform updates and modifications
+Enable connection to DB
+Resume operations
+
+Modifying MySQL DB in Live production environment without downtime
+Take DB backup
+Using Percona Toolkit to perform DB updates to temp DB and perform dry runs before applying to actual database.
+
+https://brightinventions.pl/blog/how-to-alter-large-mysql-tables-on-production
