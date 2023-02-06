@@ -1,0 +1,17 @@
+image:
+  name: 'ratanindycium/pipeline-base-image:1.0'
+  username: $DOCKER_HUB_USERNAME
+  password: $DOCKER_HUB_PASSWORD
+pipelines:
+  branches:
+    servers:
+      - step:
+          name:  Setup passwordless SSH between servers
+          deployment: production
+          script:
+            - touch ansible-log.json
+            - chmod 777 ansible-log.json
+            - cp -f vault_secret.sh ~/
+            - chmod 777 ~/vault_secret.sh
+            - cp -f .ansible.cfg ~/.ansible.cfg
+            - ansible-playbook -i hosts.yml ansible_setup_passwordless_ssh.yml --user=${SUDO_USERNAME} --extra-vars "ansible_sudo_pass=${SUDO_PASSWORD}"
