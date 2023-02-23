@@ -1,26 +1,36 @@
 # Jenkins Shared Library
-###Import the below libraries in your application/project's jenkins pipeline:\
+### Import the below libraries in your application/project's jenkins pipeline:
 - optumpixel-jenkins_shared_library
 - com.optum.jenkins.pipeline.library
 
-Example:        
- ```     #! usr/bin/env groovy    
-         @Library(["com.optum.jenkins.pipeline.library@master", "optum-eeps-optumpixel-jenkins_shared_library"]) _   
-          ```
-## Jenkins Terraform functions*
-**Function Name** : oplTerraformModuleBuild
-* **Purpose**: This function can be used to perform build steps in the Build stages of the pipeline
-* **Usage**: By default, this function can be invoked as shown below.\  \
-```        oplTerraformModuleBuild(env, params)       ```     
-* **Notes**: 
-**env** : Environment Variables refers to the variable defined in the Jenkins configuration settings or this value can be overwritten by definiing it in the Jenkins pipeline as following.\ 
-```           environment {        TERRAFORM_VERSION = '1.2'      }   ```      
-**params** : This variable is for sending status of the build. It is defined in sendbuildnotification function.      oplTerraformModuleBuild can be refered in Stage sections for Build and defined as following
+Example:
+        
+ ```
+#! usr/bin/env groovy    
+@Library(["com.optum.jenkins.pipeline.library@master", "optum-eeps-optumpixel-jenkins_shared_library"]) _   
 ```
-stage('Branch Build') {                                  
-steps {                                                       
-doBuild()                                               
-}                                                        }
+
+## Jenkins Terraform functions
+* **Function Name**: oplTerraformModuleBuild
+* **Purpose**: This function can be used to perform build steps in the Build stages of the pipeline
+* **Usage**: By default, this function can be invoked as shown below.
+
+   ``` oplTerraformModuleBuild(env, params) ```
+     
+* **Notes**: 
+
+  **env** : This variable refers to the variable defined in the Jenkins configuration settings or it can be overwritten by defining it in the Jenkins pipeline as following.
+ 
+  ``` environment {        TERRAFORM_VERSION = '1.2'      }   ```  
+    
+ **params** : This variable is used for sending status of the build. It is defined in sendBuildNotification function. **oplTerraformModuleBuild** function can be referred in stage sections for build and is defined as follows:
+
+```
+      stage('Branch Build') {
+        steps {
+         doBuild()
+        }
+      }
 ```
 
 
