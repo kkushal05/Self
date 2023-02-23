@@ -21,6 +21,7 @@ Example:
 
   **env** : This variable refers to the variable defined in the Jenkins configuration settings or it can be overwritten by defining it in the Jenkins pipeline as following.
  
+ 
   ``` environment {        TERRAFORM_VERSION = '1.2'      }   ```  
     
  **params** : This variable is used for sending status of the build. It is defined in sendBuildNotification function. **oplTerraformModuleBuild** function can be referred in stage sections for build and is defined as follows:
