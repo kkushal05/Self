@@ -1,3 +1,29 @@
+# Jenkins Shared Library
+###Import the below libraries in your application/project's jenkins pipeline:\
+- optumpixel-jenkins_shared_library
+- com.optum.jenkins.pipeline.library
+
+Example:        
+ ```     #! usr/bin/env groovy    
+         @Library(["com.optum.jenkins.pipeline.library@master", "optum-eeps-optumpixel-jenkins_shared_library"]) _   
+          ```
+## Jenkins Terraform functions*
+**Function Name** : oplTerraformModuleBuild
+* **Purpose**: This function can be used to perform build steps in the Build stages of the pipeline
+* **Usage**: By default, this function can be invoked as shown below.\  \
+```        oplTerraformModuleBuild(env, params)       ```     
+* **Notes**: 
+**env** : Environment Variables refers to the variable defined in the Jenkins configuration settings or this value can be overwritten by definiing it in the Jenkins pipeline as following.\ 
+```           environment {        TERRAFORM_VERSION = '1.2'      }   ```      
+**params** : This variable is for sending status of the build. It is defined in sendbuildnotification function.      oplTerraformModuleBuild can be refered in Stage sections for Build and defined as following
+```
+stage('Branch Build') {                                  
+steps {                                                       
+doBuild()                                               
+}                                                        }
+```
+
+
 # Foobar
 
 Foobar is a Python library for dealing with word pluralization.
