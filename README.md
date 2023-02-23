@@ -23,7 +23,8 @@ Example:
  
  
   ``` environment {        TERRAFORM_VERSION = '1.2'      }   ```  
-    
+
+
  **params** : This variable is used for sending status of the build. It is defined in sendBuildNotification function. **oplTerraformModuleBuild** function can be referred in stage sections for build and is defined as follows:
 
 ```
