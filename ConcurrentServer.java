@@ -4,6 +4,11 @@ import java.nio.*;
 import java.nio.channels.*;
 import java.util.*;
 
+/**
+This server creates a ServerSocketChannel to listen for incoming connections, and registers it with a Selector to handle concurrency. It also creates N children as specified by the command line argument, each of which connects to the server and sends random strings of length 5 every 2 seconds.
+
+When the server receives a message from a client, it sends it to all other connected clients. It also keeps track of the number of messages received and sends a "hello" message to all clients after every 20th message. The children simply reply with
+**/
 public class ConcurrentServer {
     private static final int BUFFER_SIZE = 1024;
     private static final int MAX_CLIENTS = 10;
