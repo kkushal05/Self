@@ -1,6 +1,9 @@
 import java.util.Random;
 import java.util.concurrent.Semaphore;
 
+/**
+Note that the sendSignal() method should use platform-specific code to send the SIGTERM and SIGKILL signals. In this example, I've left it as a comment and used the Runtime.getRuntime().exec() method as an example for Linux. On other platforms, this code may need to be modified accordingly.
+**/
 public class ProcessCommunication {
     static int N;
     static int M;
