@@ -8,6 +8,9 @@ import java.net.URL;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+Note that in order for this program to work, you need to have a file named webpages.txt in the same directory as the Java file, and the URLs in the file should be in the format specified in the prompt. The program reads the file line by line and performs the checks for each URL. The isDomainExists method checks if the domain exists by trying to resolve its IP address. The isWebServerRunning method checks if a web server is running on port 80 by trying to establish a connection to it. The printOpenPorts method prints which other ports in the range [1-10000] are open on the server. The isFileExists method checks if the file specified in the URL exists by sending a HTTP HEAD request to the server.
+**/
 public class WebpageChecker {
 
     public static void main(String[] args) {
