@@ -1,0 +1,148 @@
+
+To set up Grafana in Kubernetes, you typically deploy it as a Kubernetes application using manifests (YAML files). Here's a basic guide to setting up Grafana in Kubernetes:
+
+1. **Create a Namespace (Optional)**:
+   While not strictly necessary, it's a good practice to create a separate namespace for Grafana:
+
+   ```yaml
+   apiVersion: v1
+   kind: Namespace
+   metadata:
+     name: monitoring
+   ```
+
+2. **Create PersistentVolume and PersistentVolumeClaim (Optional)**:
+   If you want to use persistent storage for Grafana's data, you can create a PersistentVolume and a PersistentVolumeClaim:
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: grafana-pv
+   spec:
+     capacity:
+       storage: 5Gi
+     accessModes:
+       - ReadWriteOnce
+     hostPath:
+       path: /data/grafana
+
+   ---
+
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: grafana-pvc
+     namespace: monitoring
+   spec:
+     accessModes:
+       - ReadWriteOnce
+     resources:
+       requests:
+         storage: 5Gi
+   ```
+
+3. **Deploy Grafana Deployment**:
+   Create a Deployment manifest for Grafana:
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: grafana
+     namespace: monitoring
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: grafana
+     template:
+       metadata:
+         labels:
+           app: grafana
+       spec:
+         containers:
+           - name: grafana
+             image: grafana/grafana:latest
+             ports:
+               - containerPort: 3000
+             volumeMounts:
+               - name: grafana-storage
+                 mountPath: /var/lib/grafana
+         volumes:
+           - name: grafana-storage
+             persistentVolumeClaim:
+               claimName: grafana-pvc
+   ```
+
+4. **Expose Grafana Service**:
+   Expose Grafana using a Service manifest:
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     name: grafana
+     namespace: monitoring
+   spec:
+     selector:
+       app: grafana
+     ports:
+       - port: 3000
+         targetPort: 3000
+     type: NodePort
+   ```
+
+5. **Access Grafana**:
+   If you used `NodePort` as the service type, Grafana will be accessible on any node's IP address on the port specified in the Service definition (default is 3000). You can access it via `http://<node_ip>:<node_port>`.
+
+These are basic manifests to get Grafana up and running in Kubernetes. You can further customize Grafana deployment according to your requirements, such as configuring data sources, dashboards, authentication, and more.
+
+To configure the NGINX Ingress Controller to route traffic to Grafana in Kubernetes, you need to define an Ingress resource. Below is an example of how to set up an Ingress resource to expose Grafana using the NGINX Ingress Controller:
+
+1. **Ensure NGINX Ingress Controller is Installed**:
+   Before creating the Ingress resource, make sure you have the NGINX Ingress Controller installed in your cluster. You can install it using Helm or other installation methods.
+
+2. **Define Ingress Resource**:
+   Create an Ingress resource YAML file (`grafana-ingress.yaml`) with the following content:
+
+   ```yaml
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   metadata:
+     name: grafana-ingress
+     namespace: monitoring
+     annotations:
+       kubernetes.io/ingress.class: nginx
+   spec:
+     rules:
+       - host: grafana.example.com  # Replace with your desired hostname
+         http:
+           paths:
+             - path: /
+               pathType: Prefix
+               backend:
+                 service:
+                   name: grafana
+                   port:
+                     number: 3000
+   ```
+
+   In this example, replace `grafana.example.com` with your desired hostname. This is the hostname that users will use to access Grafana. Also, ensure that the `service.name` matches the name of your Grafana service.
+
+3. **Apply the Ingress Resource**:
+   Apply the Ingress resource to your Kubernetes cluster:
+
+   ```
+   kubectl apply -f grafana-ingress.yaml
+   ```
+
+4. **DNS Configuration (Optional)**:
+   Make sure the hostname specified in the Ingress resource (`grafana.example.com` in this example) is DNS resolvable to the IP address of one of your cluster nodes.
+
+5. **Access Grafana**:
+   Once the Ingress resource is applied and DNS is configured (if applicable), Grafana should be accessible at the specified hostname (`grafana.example.com` in this example). You can access it via a web browser.
+
+Ensure that your NGINX Ingress Controller is properly configured and running in your Kubernetes cluster. Additionally, make sure that any firewall rules or network policies allow traffic to reach the NGINX Ingress Controller and the Grafana service.
+
+
