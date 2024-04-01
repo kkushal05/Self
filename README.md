@@ -1,3 +1,7 @@
+
+mongoexport --db mydb --collection mycollection --type=csv --fields "$(mongo mydb --quiet --eval "db.mycollection.findOne()")" --out mycollection.csv
+
+
 # Jenkins Shared Library
 ### Import the below libraries in your application/project's jenkins pipeline:
 - optumpixel-jenkins_shared_library
