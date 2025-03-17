@@ -1,70 +1,152 @@
+Deploying Elasticsearch across three servers in different data centers using Docker Compose while ensuring all instances are active-active (accepting writes) and fully synchronized requires a multi-cluster setup with **Cross-Cluster Replication (CCR)** or a **multi-node cluster** configuration. Below is a step-by-step guide to achieve this:
 
-Certainly! Below is a basic example of how to use Jackson's `JsonParser` to stream and process a large JSON response array without loading it entirely into memory in a Spring Boot application:
+---
 
-```java
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonToken;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+### **Step 1: Prerequisites**
+1. **Three RHEL 8 servers** with domain names:
+   - `el1.com`
+   - `el2.com`
+   - `el3.com`
+2. **Docker and Docker Compose** installed on all servers.
+3. **Network connectivity** between the servers (ensure ports `9200` and `9300` are open).
+4. **Synchronized time** using NTP.
 
-@Service
-public class LargeJsonArrayProcessor {
+---
 
-    private final RestTemplate restTemplate;
+### **Step 2: Create a Docker Compose File for Each Server**
+Create a `docker-compose.yml` file on each server. Replace `el1.com`, `el2.com`, and `el3.com` with the respective domain names.
 
-    public LargeJsonArrayProcessor(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
-    }
+#### **Example `docker-compose.yml` for `el1.com`:**
+```yaml
+version: '3.8'
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
+    container_name: elasticsearch
+    environment:
+      - node.name=node-1
+      - cluster.name=my-elastic-cluster
+      - discovery.seed_hosts=el2.com,el3.com
+      - cluster.initial_master_nodes=node-1,node-2,node-3
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
+      - ELASTIC_PASSWORD=changeme  # Set a secure password
+      - xpack.security.enabled=true
+      - xpack.security.transport.ssl.enabled=true
+      - xpack.security.transport.ssl.verification_mode=certificate
+      - xpack.security.transport.ssl.keystore.path=/usr/share/elasticsearch/config/certs/elastic-certificates.p12
+      - xpack.security.transport.ssl.truststore.path=/usr/share/elasticsearch/config/certs/elastic-certificates.p12
+    volumes:
+      - esdata1:/usr/share/elasticsearch/data
+      - ./certs:/usr/share/elasticsearch/config/certs
+    ports:
+      - 9200:9200
+      - 9300:9300
+    networks:
+      - elastic
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
 
-    public List<String> processLargeJsonArray(String apiUrl) throws IOException {
-        List<String> dataArray = new ArrayList<>();
+volumes:
+  esdata1:
+    driver: local
 
-        // Create a JsonFactory
-        JsonFactory jsonFactory = new JsonFactory();
-
-        // Make a GET request to the API
-        String jsonResponse = restTemplate.getForObject(apiUrl, String.class);
-
-        // Create a JsonParser
-        try (JsonParser jsonParser = jsonFactory.createParser(jsonResponse)) {
-            // Move to the start of the array
-            jsonParser.nextToken(); // Start array
-
-            // Loop through the array elements
-            while (jsonParser.nextToken() == JsonToken.START_OBJECT) {
-                // Read each object within the array
-                String item = readJsonItem(jsonParser);
-                dataArray.add(item);
-            }
-        }
-
-        return dataArray;
-    }
-
-    private String readJsonItem(JsonParser jsonParser) throws IOException {
-        StringBuilder jsonItem = new StringBuilder();
-        // Start of object
-        jsonItem.append(jsonParser.getCurrentToken().asLiteral().toString());
-        while (jsonParser.nextToken() != JsonToken.END_OBJECT) {
-            jsonItem.append(jsonParser.getCurrentToken().asLiteral().toString());
-        }
-        // End of object
-        jsonItem.append(jsonParser.getCurrentToken().asLiteral().toString());
-        return jsonItem.toString();
-    }
-}
+networks:
+  elastic:
+    driver: bridge
 ```
 
-In this example:
+#### **Repeat for `el2.com` and `el3.com`:**
+- Replace `node.name=node-1` with `node.name=node-2` and `node.name=node-3` respectively.
+- Ensure `discovery.seed_hosts` and `cluster.initial_master_nodes` are consistent across all files.
 
-- We have a `LargeJsonArrayProcessor` service class that retrieves a JSON response from a given API endpoint using Spring's `RestTemplate`.
-- We use Jackson's `JsonFactory` to create a `JsonParser`.
-- Inside the `processLargeJsonArray` method, we loop through the JSON array elements without loading the entire array into memory at once.
-- For each array element, we call the `readJsonItem` method to read and process the individual JSON object, then add it to a list (`dataArray`).
-- The `readJsonItem` method reads an individual JSON object from the `JsonParser` and returns it as a string.
+---
 
-This approach allows you to efficiently process large JSON arrays without consuming excessive memory in your Spring Boot application.
+### **Step 3: Generate and Distribute Certificates**
+Elasticsearch 8.x requires TLS for inter-node communication. Generate certificates on one server and distribute them to all nodes.
+
+1. **Generate certificates**:
+   ```bash
+   docker run -it --rm docker.elastic.co/elasticsearch/elasticsearch:8.10.0 \
+     bin/elasticsearch-certutil ca
+   docker run -it --rm docker.elastic.co/elasticsearch/elasticsearch:8.10.0 \
+     bin/elasticsearch-certutil cert --ca elastic-stack-ca.p12
+   ```
+
+2. **Copy the certificates** to the `certs` directory on each server.
+
+---
+
+### **Step 4: Start the Elasticsearch Cluster**
+1. **Start Elasticsearch on each server**:
+   ```bash
+   docker-compose up -d
+   ```
+
+2. **Verify the cluster health**:
+   ```bash
+   curl -X GET "https://el1.com:9200/_cluster/health?pretty" -u elastic:changeme --insecure
+   ```
+
+   The response should show `"status" : "green"`.
+
+---
+
+### **Step 5: Configure Active-Active Replication**
+To ensure all nodes accept writes and stay synchronized, use **Cross-Cluster Replication (CCR)**.
+
+1. **Enable CCR** in `elasticsearch.yml` on each node:
+   ```yaml
+   cluster.remote:
+     el2:
+       seeds: ["el2.com:9300"]
+     el3:
+       seeds: ["el3.com:9300"]
+   ```
+
+2. **Create a follower index** on each node to replicate data:
+   ```bash
+   curl -X POST "https://el1.com:9200/_ccr/follow?wait_for_active_shards=1" \
+     -H "Content-Type: application/json" \
+     -u elastic:changeme --insecure \
+     -d '{
+           "remote_cluster": "el2",
+           "leader_index": "my-index"
+         }'
+   ```
+
+   Repeat for `el2.com` and `el3.com`.
+
+---
+
+### **Step 6: Test the Setup**
+1. **Write data to one node**:
+   ```bash
+   curl -X POST "https://el1.com:9200/my-index/_doc/1" \
+     -H "Content-Type: application/json" \
+     -u elastic:changeme --insecure \
+     -d '{"message": "Hello from el1"}'
+   ```
+
+2. **Verify data on other nodes**:
+   ```bash
+   curl -X GET "https://el2.com:9200/my-index/_search" \
+     -u elastic:changeme --insecure
+   ```
+
+---
+
+### **Step 7: Monitor and Maintain**
+1. Use **Kibana** for monitoring and managing the cluster.
+2. Set up **snapshots** for backups.
+3. Regularly check cluster health and performance.
+
+---
+
+### **Troubleshooting**
+- If nodes cannot join the cluster, check firewall rules and ensure `discovery.seed_hosts` is correctly configured.
+- Use the Elasticsearch logs (`docker logs elasticsearch`) for debugging.
+
+Let me know if you need further assistance! 🚀
