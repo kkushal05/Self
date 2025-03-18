@@ -1,0 +1,153 @@
+Setting up a multi-node Elasticsearch cluster using Docker where each node acts as both a master and data node on RHEL8 involves several steps. Below is a guide to help you set up this configuration.
+
+### Prerequisites
+1. **Docker**: Ensure Docker is installed on your RHEL8 system.
+2. **Docker Compose**: Install Docker Compose for managing multi-container Docker applications.
+3. **Elasticsearch Docker Image**: Use the official Elasticsearch Docker image.
+
+### Step 1: Install Docker and Docker Compose
+
+1. **Install Docker**:
+   ```bash
+   sudo yum install -y yum-utils
+   sudo yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+   sudo yum install docker-ce docker-ce-cli containerd.io
+   sudo systemctl start docker
+   sudo systemctl enable docker
+   ```
+
+2. **Install Docker Compose**:
+   ```bash
+   sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+   sudo chmod +x /usr/local/bin/docker-compose
+   ```
+
+### Step 2: Create Docker Compose File
+
+Create a `docker-compose.yml` file to define your Elasticsearch cluster.
+
+```yaml
+version: '3.7'
+services:
+  elasticsearch1:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.1
+    container_name: elasticsearch1
+    environment:
+      - node.name=elasticsearch1
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=elasticsearch2,elasticsearch3
+      - cluster.initial_master_nodes=elasticsearch1,elasticsearch2,elasticsearch3
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata1:/usr/share/elasticsearch/data
+    ports:
+      - 9200:9200
+    networks:
+      - esnet
+
+  elasticsearch2:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.1
+    container_name: elasticsearch2
+    environment:
+      - node.name=elasticsearch2
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=elasticsearch1,elasticsearch3
+      - cluster.initial_master_nodes=elasticsearch1,elasticsearch2,elasticsearch3
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata2:/usr/share/elasticsearch/data
+    networks:
+      - esnet
+
+  elasticsearch3:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.1
+    container_name: elasticsearch3
+    environment:
+      - node.name=elasticsearch3
+      - cluster.name=es-docker-cluster
+      - discovery.seed_hosts=elasticsearch1,elasticsearch2
+      - cluster.initial_master_nodes=elasticsearch1,elasticsearch2,elasticsearch3
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata3:/usr/share/elasticsearch/data
+    networks:
+      - esnet
+
+volumes:
+  esdata1:
+    driver: local
+  esdata2:
+    driver: local
+  esdata3:
+    driver: local
+
+networks:
+  esnet:
+```
+
+### Step 3: Start the Cluster
+
+Run the following command to start the Elasticsearch cluster:
+
+```bash
+docker-compose up -d
+```
+
+### Step 4: Verify the Cluster
+
+1. **Check Cluster Health**:
+   ```bash
+   curl -X GET "localhost:9200/_cluster/health?pretty"
+   ```
+
+2. **List Nodes**:
+   ```bash
+   curl -X GET "localhost:9200/_cat/nodes?v"
+   ```
+
+### Step 5: Configure RHEL8 for Elasticsearch
+
+Ensure your RHEL8 system is configured to support Elasticsearch:
+
+1. **Increase Virtual Memory**:
+   ```bash
+   sudo sysctl -w vm.max_map_count=262144
+   ```
+
+2. **Make it Permanent**:
+   Add `vm.max_map_count=262144` to `/etc/sysctl.conf`.
+
+3. **Disable Swap**:
+   ```bash
+   sudo swapoff -a
+   ```
+
+4. **Make it Permanent**:
+   Remove swap entries from `/etc/fstab`.
+
+### Step 6: Security Considerations
+
+1. **Firewall Configuration**:
+   Ensure ports 9200 and 9300 are open for communication between nodes.
+
+2. **SELinux Configuration**:
+   If SELinux is enabled, configure it to allow Docker containers to communicate.
+
+### Conclusion
+
+You now have a multi-node Elasticsearch cluster running on Docker where each node is both a master and data node. This setup is suitable for development and testing environments. For production, consider separating master and data nodes and adding more robust security measures.
