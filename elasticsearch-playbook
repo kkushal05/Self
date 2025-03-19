@@ -1,0 +1,121 @@
+To set up an Elasticsearch cluster using Docker on three RHEL 9 servers, you can use the following Ansible playbook. This playbook will configure each server as a master node, ensuring that all nodes can accept both read and write requests.
+
+### Prerequisites:
+1. Ensure Docker is installed and running on all three servers.
+2. Ansible is installed on the control machine.
+3. SSH access to the three servers with sudo privileges.
+
+### Ansible Playbook: `elasticsearch_cluster.yml`
+
+```yaml
+---
+- name: Set up Elasticsearch cluster using Docker
+  hosts: all
+  become: yes
+  vars:
+    es_version: "8.10.0"  # Specify the Elasticsearch version
+    cluster_name: "my_elasticsearch_cluster"
+    node_names:
+      - "node-1"
+      - "node-2"
+      - "node-3"
+    node_ips:
+      - "144.8.103.88"
+      - "144.8.103.15"
+      - "144.8.103.19"
+    docker_network: "elasticsearch_network"
+
+  tasks:
+    - name: Ensure Docker network exists
+      docker_network:
+        name: "{{ docker_network }}"
+        driver: bridge
+
+    - name: Pull Elasticsearch Docker image
+      docker_image:
+        name: "docker.elastic.co/elasticsearch/elasticsearch:{{ es_version }}"
+        source: pull
+
+    - name: Create Elasticsearch data directory
+      file:
+        path: "/var/lib/elasticsearch"
+        state: directory
+        owner: 1000
+        group: 1000
+        mode: '0755'
+
+    - name: Start Elasticsearch container
+      docker_container:
+        name: "elasticsearch-{{ node_names[play_hosts.index(inventory_hostname)] }}"
+        image: "docker.elastic.co/elasticsearch/elasticsearch:{{ es_version }}"
+        state: started
+        restart_policy: always
+        network_mode: "{{ docker_network }}"
+        env:
+          node.name: "{{ node_names[play_hosts.index(inventory_hostname)] }}"
+          cluster.name: "{{ cluster_name }}"
+          discovery.seed_hosts: "{{ node_ips | join(',') }}"
+          cluster.initial_master_nodes: "{{ node_names | join(',') }}"
+          bootstrap.memory_lock: "true"
+          ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+        ulimits:
+          - memlock: -1:-1
+        volumes:
+          - "/var/lib/elasticsearch:/usr/share/elasticsearch/data"
+        ports:
+          - "9200:9200"
+          - "9300:9300"
+
+    - name: Ensure Elasticsearch is running
+      uri:
+        url: "http://localhost:9200"
+        method: GET
+        status_code: 200
+      register: es_status
+      until: es_status.status == 200
+      retries: 10
+      delay: 10
+
+- name: Verify cluster health
+  hosts: 144.8.103.88
+  become: yes
+  tasks:
+    - name: Check cluster health
+      uri:
+        url: "http://localhost:9200/_cluster/health"
+        method: GET
+        return_content: yes
+      register: cluster_health
+
+    - name: Display cluster health
+      debug:
+        msg: "{{ cluster_health.json }}"
+```
+
+### Inventory File: `hosts`
+
+```ini
+[elasticsearch_nodes]
+144.8.103.88
+144.8.103.15
+144.8.103.19
+```
+
+### Explanation:
+
+1. **Docker Network**: A Docker network named `elasticsearch_network` is created to allow communication between the Elasticsearch containers.
+2. **Elasticsearch Image**: The specified version of the Elasticsearch Docker image is pulled.
+3. **Data Directory**: A directory is created on each host to persist Elasticsearch data.
+4. **Container Configuration**: Each Elasticsearch container is configured with the appropriate environment variables to form a cluster. The `discovery.seed_hosts` and `cluster.initial_master_nodes` variables are set to ensure that all nodes can discover each other and form a cluster.
+5. **Ports**: Ports `9200` (HTTP) and `9300` (Transport) are exposed for Elasticsearch.
+6. **Cluster Health Check**: After the containers are started, the playbook checks the cluster health to ensure everything is running correctly.
+
+### Running the Playbook
+
+To run the playbook, use the following command:
+
+```bash
+ansible-playbook -i hosts elasticsearch_cluster.yml
+```
+
+This will set up an Elasticsearch cluster on the three specified servers, with each server acting as a master node. The cluster will be accessible via the specified IPs on port `9200`.
