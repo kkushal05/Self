@@ -1,0 +1,107 @@
+---
+- name: Download OpenStack Images and Upload to Artifactory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    openstack_cloud: "{{ openstack_cloud_name | default('mycloud') }}" # Default cloud name
+    artifactory_url: "{{ artifactory_url_var }}"
+    artifactory_user: "{{ artifactory_user_var }}"
+    artifactory_password: "{{ artifactory_password_var }}"
+    artifactory_repo: "{{ artifactory_repo_var }}"
+    download_dir: "/tmp/openstack_images"
+
+  tasks:
+    - name: Ensure download directory exists
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: directory
+
+    - name: Get OpenStack projects
+      openstack.cloud:
+        cloud: "{{ openstack_cloud }}"
+        command: project list
+        format: json
+      register: openstack_projects
+
+    - name: Get OpenStack images for each project
+      openstack.cloud:
+        cloud: "{{ openstack_cloud }}"
+        command: image list --project {{ item.id }}
+        format: json
+      loop: "{{ openstack_projects.list }}"
+      register: project_images
+
+    - name: Download and upload images
+      block:
+        - name: Download image
+          openstack.cloud:
+            cloud: "{{ openstack_cloud }}"
+            command: image save {{ image.id }} --file {{ download_dir }}/{{ image.id }}.img
+          loop: "{{ project_images.results | map(attribute='list') | flatten(levels=1) }}"
+          loop_control:
+            loop_var: image
+
+        - name: Upload image to Artifactory
+          ansible.builtin.uri:
+            url: "{{ artifactory_url }}/{{ artifactory_repo }}/{{ item.id }}.img"
+            method: PUT
+            src: "{{ download_dir }}/{{ item.id }}.img"
+            headers:
+              Content-Type: "application/octet-stream"
+            status_code: 201
+            force_basic_auth: true
+            login_user: "{{ artifactory_user }}"
+            password: "{{ artifactory_password }}"
+          loop: "{{ project_images.results | map(attribute='list') | flatten(levels=1) }}"
+          register: artifactory_upload_results
+
+        - name: Display Artifactory upload results (failed)
+          ansible.builtin.debug:
+            msg: "Failed to upload {{ item.item.id }}. Status code: {{ item.status_code }}, response: {{ item.content }}"
+          loop: "{{ artifactory_upload_results.results }}"
+          when: item.status_code != 201
+
+        - name: Remove downloaded image
+          ansible.builtin.file:
+            path: "{{ download_dir }}/{{ item.id }}.img"
+            state: absent
+          loop: "{{ project_images.results | map(attribute='list') | flatten(levels=1) }}"
+
+      rescue:
+        - name: Display error if download or upload fails
+          ansible.builtin.debug:
+            msg: "An error occurred during image download or upload."
+
+    - name: Remove download directory
+      ansible.builtin.file:
+        path: "{{ download_dir }}"
+        state: absent
+
+How to use:
+ * Save the playbook: Save the YAML code as a .yml file (e.g., upload_images.yml).
+ * Set variables: Create a variables file (e.g., vars.yml) or pass variables via the command line. Example vars.yml:
+   openstack_cloud_name: "mycloud" # Replace with your cloud name if needed.
+artifactory_url_var: "http://your-artifactory-url/artifactory"
+artifactory_user_var: "artifactory_user"
+artifactory_password_var: "artifactory_password"
+artifactory_repo_var: "your-repo"
+
+ * Run the playbook:
+   ansible-playbook upload_images.yml -e @vars.yml
+
+   Or pass them directly on the command line:
+   ansible-playbook upload_images.yml -e "openstack_cloud_name=mycloud artifactory_url_var=http://your-artifactory-url/artifactory artifactory_user_var=artifactory_user artifactory_password_var=artifactory_password artifactory_repo_var=your-repo"
+
+Key improvements and explanations:
+ * Ansible Modules: Uses the openstack.cloud module for OpenStack interactions and the uri module for Artifactory uploads.
+ * Variable Handling: Uses Ansible variables for configuration, making the playbook more flexible.
+ * Looping: Uses Ansible loops to iterate through projects and images.
+ * Error Handling: Uses block/rescue for basic error handling during the download and upload process.
+ * Temporary Directory: Creates and uses a temporary directory (/tmp/openstack_images) for storing downloaded images.
+ * Clean Up: Removes downloaded images and the temporary directory after the upload is complete.
+ * Debug Output: Includes debug output to show Artifactory upload results, especially for failed uploads.
+ * Idempotency: The file module ensures that the download directory is created only if it doesn't exist, and removed only if it does.
+ * Cloud name default value: The cloud name now has a default value, in case it is not provided.
+ * Improved looping: uses map(attribute='list') | flatten(levels=1) for a more robust method of getting all images from the projects.
+ * Status code check: the playbook now checks the artifactory status code and prints the error when the upload fails.
+ * Force basic authentication: force_basic_auth: true is added to the artifactory upload task.
