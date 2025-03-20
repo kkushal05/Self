@@ -1,0 +1,63 @@
+To set up a Kibana cluster on 3 servers using Docker and connect each Kibana instance to an Elasticsearch cluster, you can use the following Ansible playbook. This playbook assumes that you have Docker installed on all 3 servers and that the Elasticsearch cluster is already set up and accessible.
+
+### Ansible Playbook: `kibana_cluster_setup.yml`
+
+```yaml
+---
+- name: Setup Kibana Cluster on 3 Servers
+  hosts: kibana_servers
+  become: yes
+  vars:
+    elasticsearch_host: "http://your_elasticsearch_cluster:9200"  # Replace with your Elasticsearch cluster URL
+    kibana_version: "7.10.1"  # Replace with your desired Kibana version
+    kibana_servers:
+      - server1
+      - server2
+      - server3
+
+  tasks:
+    - name: Ensure Docker is installed
+      apt:
+        name: docker.io
+        state: present
+        update_cache: yes
+
+    - name: Ensure Docker service is running
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Pull Kibana Docker image
+      docker_image:
+        name: "docker.elastic.co/kibana/kibana:{{ kibana_version }}"
+        source: pull
+
+    - name: Create Kibana container
+      docker_container:
+        name: "kibana_{{ inventory_hostname }}"
+        image: "docker.elastic.co/kibana/kibana:{{ kibana_version }}"
+        state: started
+        restart_policy: always
+        env:
+          ELASTICSEARCH_HOSTS: "{{ elasticsearch_host }}"
+        ports:
+          - "5601:5601"
+        networks:
+          - name: kibana_network
+
+    - name: Ensure Kibana network exists
+      docker_network:
+        name: kibana_network
+        state: present
+
+    - name: Wait for Kibana to be ready
+      uri:
+        url: "http://localhost:5601"
+        method: GET
+        status_code: 200
+        retries: 10
+        delay: 10
+      register: kibana_ready
+      until: kibana_ready is success
+      retries: 10
