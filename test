@@ -1,152 +1,129 @@
-Deploying Elasticsearch across three servers in different data centers using Docker Compose while ensuring all instances are active-active (accepting writes) and fully synchronized requires a multi-cluster setup with **Cross-Cluster Replication (CCR)** or a **multi-node cluster** configuration. Below is a step-by-step guide to achieve this:
+# Ansible Playbook to Gather Security Group Rules from Multiple OpenStack Clouds
 
----
+This playbook will:
+1. Connect to multiple OpenStack clouds
+2. Retrieve security group rules from each cloud
+3. Create a unique consolidated list of all security group rules
+4. Save the results to a JSON file
 
-### **Step 1: Prerequisites**
-1. **Three RHEL 8 servers** with domain names:
-   - `el1.com`
-   - `el2.com`
-   - `el3.com`
-2. **Docker and Docker Compose** installed on all servers.
-3. **Network connectivity** between the servers (ensure ports `9200` and `9300` are open).
-4. **Synchronized time** using NTP.
+## Prerequisites
+- Ansible installed
+- `openstacksdk` Python package installed
+- OpenStack credentials for each cloud you want to query
 
----
+## Playbook: `gather_security_group_rules.yml`
 
-### **Step 2: Create a Docker Compose File for Each Server**
-Create a `docker-compose.yml` file on each server. Replace `el1.com`, `el2.com`, and `el3.com` with the respective domain names.
-
-#### **Example `docker-compose.yml` for `el1.com`:**
 ```yaml
-version: '3.8'
-services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
-    container_name: elasticsearch
-    environment:
-      - node.name=node-1
-      - cluster.name=my-elastic-cluster
-      - discovery.seed_hosts=el2.com,el3.com
-      - cluster.initial_master_nodes=node-1,node-2,node-3
-      - bootstrap.memory_lock=true
-      - ES_JAVA_OPTS=-Xms2g -Xmx2g
-      - ELASTIC_PASSWORD=changeme  # Set a secure password
-      - xpack.security.enabled=true
-      - xpack.security.transport.ssl.enabled=true
-      - xpack.security.transport.ssl.verification_mode=certificate
-      - xpack.security.transport.ssl.keystore.path=/usr/share/elasticsearch/config/certs/elastic-certificates.p12
-      - xpack.security.transport.ssl.truststore.path=/usr/share/elasticsearch/config/certs/elastic-certificates.p12
-    volumes:
-      - esdata1:/usr/share/elasticsearch/data
-      - ./certs:/usr/share/elasticsearch/config/certs
-    ports:
-      - 9200:9200
-      - 9300:9300
-    networks:
-      - elastic
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
+---
+- name: Gather security group rules from multiple OpenStack clouds
+  hosts: localhost
+  gather_facts: false
+  vars:
+    output_file: "security_group_rules_consolidated.json"
+    clouds:
+      - name: "cloud1"
+        auth:
+          auth_url: "https://cloud1.example.com:5000/v3"
+          username: "username"
+          password: "password"
+          project_name: "project"
+          user_domain_name: "Default"
+          project_domain_name: "Default"
+      - name: "cloud2"
+        auth:
+          auth_url: "https://cloud2.example.com:5000/v3"
+          username: "username"
+          password: "password"
+          project_name: "project"
+          user_domain_name: "Default"
+          project_domain_name: "Default"
+    # Add more clouds as needed
 
-volumes:
-  esdata1:
-    driver: local
+  tasks:
+    - name: Initialize empty list for all security group rules
+      ansible.builtin.set_fact:
+        all_security_group_rules: []
 
-networks:
-  elastic:
-    driver: bridge
+    - name: Gather security group rules from each cloud
+      include_tasks: get_security_group_rules.yml
+      loop: "{{ clouds }}"
+      loop_control:
+        loop_var: cloud
+
+    - name: Create unique list of security group rules
+      ansible.builtin.set_fact:
+        unique_security_group_rules: "{{ all_security_group_rules | unique }}"
+
+    - name: Save consolidated security group rules to file
+      ansible.builtin.copy:
+        content: "{{ unique_security_group_rules | to_nice_json }}"
+        dest: "{{ output_file }}"
+      delegate_to: localhost
+
+    - name: Display summary
+      ansible.builtin.debug:
+        msg: "Found {{ unique_security_group_rules | length }} unique security group rules. Saved to {{ output_file }}"
 ```
 
-#### **Repeat for `el2.com` and `el3.com`:**
-- Replace `node.name=node-1` with `node.name=node-2` and `node.name=node-3` respectively.
-- Ensure `discovery.seed_hosts` and `cluster.initial_master_nodes` are consistent across all files.
+## Sub-task File: `get_security_group_rules.yml`
 
+```yaml
 ---
+- name: Connect to OpenStack cloud
+  ansible.builtin.include_role:
+    name: openstack.cloud.auth
+  vars:
+    auth: "{{ cloud.auth }}"
 
-### **Step 3: Generate and Distribute Certificates**
-Elasticsearch 8.x requires TLS for inter-node communication. Generate certificates on one server and distribute them to all nodes.
+- name: Get list of all security groups
+  openstack.cloud.security_group:
+    cloud: "{{ cloud.name }}"
+    state: list
+  register: security_groups
 
-1. **Generate certificates**:
-   ```bash
-   docker run -it --rm docker.elastic.co/elasticsearch/elasticsearch:8.10.0 \
-     bin/elasticsearch-certutil ca
-   docker run -it --rm docker.elastic.co/elasticsearch/elasticsearch:8.10.0 \
-     bin/elasticsearch-certutil cert --ca elastic-stack-ca.p12
+- name: Extract rules from security groups
+  ansible.builtin.set_fact:
+    cloud_rules: |
+      {% set rules = [] %}
+      {% for group in security_groups.security_groups %}
+        {% for rule in group.security_group_rules %}
+          {% set _ = rules.append(rule | combine({'security_group_name': group.name, 'security_group_id': group.id, 'cloud_name': cloud.name})) %}
+        {% endfor %}
+      {% endfor %}
+      {{ rules }}
+  
+- name: Add rules to consolidated list
+  ansible.builtin.set_fact:
+    all_security_group_rules: "{{ all_security_group_rules + cloud_rules }}"
+
+- name: Display count of rules found in this cloud
+  ansible.builtin.debug:
+    msg: "Found {{ cloud_rules | length }} security group rules in cloud {{ cloud.name }}"
+```
+
+## How to Use
+
+1. Save the main playbook as `gather_security_group_rules.yml`
+2. Save the sub-task file as `get_security_group_rules.yml` in the same directory
+3. Update the `clouds` variable in the playbook with your OpenStack cloud credentials
+4. Run the playbook:
+   ```
+   ansible-playbook gather_security_group_rules.yml
    ```
 
-2. **Copy the certificates** to the `certs` directory on each server.
+## Output
 
----
+The playbook will:
+1. Connect to each OpenStack cloud
+2. Retrieve all security group rules
+3. Create a unique list of rules (removing duplicates)
+4. Save the consolidated list to `security_group_rules_consolidated.json`
 
-### **Step 4: Start the Elasticsearch Cluster**
-1. **Start Elasticsearch on each server**:
-   ```bash
-   docker-compose up -d
-   ```
+## Customization
 
-2. **Verify the cluster health**:
-   ```bash
-   curl -X GET "https://el1.com:9200/_cluster/health?pretty" -u elastic:changeme --insecure
-   ```
+You can customize:
+- The output file name by changing the `output_file` variable
+- The fields included in the output by modifying the rule extraction in `get_security_group_rules.yml`
+- Add more clouds by extending the `clouds` list
 
-   The response should show `"status" : "green"`.
-
----
-
-### **Step 5: Configure Active-Active Replication**
-To ensure all nodes accept writes and stay synchronized, use **Cross-Cluster Replication (CCR)**.
-
-1. **Enable CCR** in `elasticsearch.yml` on each node:
-   ```yaml
-   cluster.remote:
-     el2:
-       seeds: ["el2.com:9300"]
-     el3:
-       seeds: ["el3.com:9300"]
-   ```
-
-2. **Create a follower index** on each node to replicate data:
-   ```bash
-   curl -X POST "https://el1.com:9200/_ccr/follow?wait_for_active_shards=1" \
-     -H "Content-Type: application/json" \
-     -u elastic:changeme --insecure \
-     -d '{
-           "remote_cluster": "el2",
-           "leader_index": "my-index"
-         }'
-   ```
-
-   Repeat for `el2.com` and `el3.com`.
-
----
-
-### **Step 6: Test the Setup**
-1. **Write data to one node**:
-   ```bash
-   curl -X POST "https://el1.com:9200/my-index/_doc/1" \
-     -H "Content-Type: application/json" \
-     -u elastic:changeme --insecure \
-     -d '{"message": "Hello from el1"}'
-   ```
-
-2. **Verify data on other nodes**:
-   ```bash
-   curl -X GET "https://el2.com:9200/my-index/_search" \
-     -u elastic:changeme --insecure
-   ```
-
----
-
-### **Step 7: Monitor and Maintain**
-1. Use **Kibana** for monitoring and managing the cluster.
-2. Set up **snapshots** for backups.
-3. Regularly check cluster health and performance.
-
----
-
-### **Troubleshooting**
-- If nodes cannot join the cluster, check firewall rules and ensure `discovery.seed_hosts` is correctly configured.
-- Use the Elasticsearch logs (`docker logs elasticsearch`) for debugging.
-
-Let me know if you need further assistance! 🚀
+Note: For security reasons, consider using Ansible Vault to encrypt your OpenStack credentials rather than storing them in plain text.
