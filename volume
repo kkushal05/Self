@@ -1,0 +1,377 @@
+Based on the updated `volumes` section you provided, I'll create a modified Ansible playbook that handles both Cinder and NFS volumes differently, with the size-based partitioning logic for Cinder volumes. Here's the solution:
+
+```yaml
+---
+- name: Configure and mount volumes
+  hosts: all
+  gather_facts: yes
+  become: yes
+
+  vars:
+    large_volume_threshold: 10000  # Threshold in GB for LVM handling (10TB)
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - parted
+        - lvm2
+        - xfsprogs
+        - nfs-common  # For NFS volumes
+      when: ansible_os_family == 'Debian'
+
+    - name: Process each volume
+      block:
+        - name: Skip NFS volumes (they don't need local formatting)
+          meta: end_play
+          when: item.TYPE == 'NFS'
+
+        - name: Get device path for Cinder volume
+          command: >
+            lsblk -o NAME,SERIAL -n -l -p | grep "{{ item.NODE }}" | awk '{print "/dev/"$1}'
+          register: cinder_device
+          changed_when: false
+          delegate_to: "{{ item.NODE }}"
+          when: item.TYPE == 'CINDER'
+
+        - name: Set device name fact
+          set_fact:
+            device_name: "{{ cinder_device.stdout_lines[0] }}"
+          when: 
+            - item.TYPE == 'CINDER'
+            - cinder_device.stdout_lines | length > 0
+
+        - name: Verify device exists
+          stat:
+            path: "{{ device_name }}"
+          register: device_stat
+          when: item.TYPE == 'CINDER'
+
+        - name: Fail if Cinder device not found
+          fail:
+            msg: "Cinder device not found on {{ item.NODE }}"
+          when:
+            - item.TYPE == 'CINDER'
+            - not device_stat.stat.exists
+
+        # For Cinder volumes > threshold (30TB in example)
+        - name: Create GPT partition table (large Cinder volumes)
+          parted:
+            device: "{{ device_name }}"
+            label: gpt
+            state: present
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Create three partitions (large Cinder volumes)
+          parted:
+            device: "{{ device_name }}"
+            number: "{{ partition }}"
+            state: present
+            part_start: "{{ ((partition-1) * (item.SIZE|int/3)) }}GB"
+            part_end: "{{ (partition * (item.SIZE|int/3)) }}GB"
+          loop: [1, 2, 3]
+          loop_control:
+            loop_var: partition
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Create LVM physical volumes (large Cinder volumes)
+          lvol:
+            vg: "vg_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+            pv: "{{ device_name }}1,{{ device_name }}2,{{ device_name }}3"
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Create volume group (large Cinder volumes)
+          lvg:
+            vg: "vg_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+            pvs: "{{ device_name }}1,{{ device_name }}2,{{ device_name }}3"
+            state: present
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Create logical volume (large Cinder volumes)
+          lvol:
+            vg: "vg_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+            lv: "lv_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+            size: "100%FREE"
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        # For Cinder volumes <= threshold (300GB and 1000GB in example)
+        - name: Create GPT partition table (small Cinder volumes)
+          parted:
+            device: "{{ device_name }}"
+            label: gpt
+            state: present
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int <= large_volume_threshold
+
+        - name: Create single partition (small Cinder volumes)
+          parted:
+            device: "{{ device_name }}"
+            number: 1
+            state: present
+            part_end: "100%"
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int <= large_volume_threshold
+
+        # Filesystem creation for all Cinder volumes
+        - name: Create filesystem (large Cinder volumes - LVM)
+          filesystem:
+            fstype: xfs
+            dev: "/dev/vg_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}/lv_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Create filesystem (small Cinder volumes)
+          filesystem:
+            fstype: xfs
+            dev: "{{ device_name }}1"
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int <= large_volume_threshold
+
+        # Mount directory creation for all volumes
+        - name: Create mount directory
+          file:
+            path: "{{ item.MOUNT_PATH }}"
+            state: directory
+            mode: '0755'
+
+        # Mounting for Cinder volumes
+        - name: Mount large Cinder volume (LVM)
+          mount:
+            path: "{{ item.MOUNT_PATH }}"
+            src: "/dev/vg_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}/lv_{{ item.NODE }}_{{ item.MOUNT_PATH | basename }}"
+            fstype: xfs
+            state: mounted
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int > large_volume_threshold
+
+        - name: Mount small Cinder volume
+          mount:
+            path: "{{ item.MOUNT_PATH }}"
+            src: "{{ device_name }}1"
+            fstype: xfs
+            state: mounted
+          when:
+            - item.TYPE == 'CINDER'
+            - item.SIZE|int <= large_volume_threshold
+
+        # NFS volume handling
+        - name: Mount NFS volume
+          mount:
+            path: "{{ item.MOUNT_PATH }}"
+            src: "{{ nfs_server }}:{{ nfs_export_path }}"
+            fstype: nfs
+            opts: defaults
+            state: mounted
+          when: item.TYPE == 'NFS'
+          vars:
+            # You'll need to define these based on your NFS setup
+            nfs_server: "your.nfs.server"
+            nfs_export_path: "/export/path/for/{{ item.NODE }}"
+
+      loop: "{{ VOLUMES }}"
+      loop_control:
+        label: "{{ item.NODE }}:{{ item.MOUNT_PATH }}"
+```
+
+Key modifications from the previous version:
+
+1. **Handles both Cinder and NFS volumes**:
+   - Skips partitioning for NFS volumes
+   - Uses different mounting methods for each type
+
+2. **Improved device detection**:
+   - Uses `lsblk` to find the Cinder volume by node name in the serial number
+
+3. **Better naming conventions**:
+   - Uses both node name and mount path basename in LVM names to ensure uniqueness
+
+4. **NFS support**:
+   - Mounts NFS volumes directly (you'll need to provide NFS server details)
+
+5. **Type-specific handling**:
+   - Only Cinder volumes get partitioned and formatted
+   - NFS volumes are mounted directly
+
+6. **Size-based logic**:
+   - Still splits large (>10TB) Cinder volumes into 3 parts with LVM
+   - Handles small Cinder volumes normally
+
+To use this playbook, you'll need to:
+
+1. Define your NFS server details (either in vars or elsewhere)
+2. Ensure your inventory has all the worker nodes defined
+3. Make sure the openstack CLI is available on nodes that need it
+4. Adjust filesystem types if you don't want XFS
+
+The playbook handles all four cases from your example:
+- worker6: 30TB Cinder → LVM
+- worker5: 300GB Cinder → single partition
+- worker3: NFS → direct mount
+- worker2: NFS → direct mount
+
+
+
+---
+- name: Configure and mount volumes
+  hosts: all
+  gather_facts: yes
+  become: yes
+
+  vars_files:
+    - vars.yml
+
+  tasks:
+    - name: Install required packages
+      apt:
+        name: "{{ item }}"
+        state: present
+        update_cache: yes
+      loop:
+        - parted
+        - lvm2
+        - xfsprogs
+
+    - name: Process each volume
+      block:
+        - name: Get device name from OpenStack host
+          command: >
+            openstack server show {{ item.node }} -f value -c volumes_attached
+          register: attached_volumes
+          changed_when: false
+          delegate_to: "{{ item.node }}"
+
+        - name: Extract device name
+          set_fact:
+            device_name: "/dev/{{ (attached_volumes.stdout | from_json)[0]['id'] }}"
+          when: attached_volumes.stdout | length > 0
+
+        - name: Check if device exists
+          stat:
+            path: "{{ device_name }}"
+          register: device_stat
+
+        - name: Fail if device not found
+          fail:
+            msg: "Device {{ device_name }} not found on {{ item.node }}"
+          when: not device_stat.stat.exists
+
+        - name: Create GPT partition table (for volumes < 10TB)
+          parted:
+            device: "{{ device_name }}"
+            label: gpt
+            state: present
+          when: item.size_gb <= 10000
+
+        - name: Create single partition (for volumes < 10TB)
+          parted:
+            device: "{{ device_name }}"
+            number: 1
+            state: present
+            part_end: "100%"
+          when: item.size_gb <= 10000
+
+        - name: Create partitions for LVM (for volumes > 10TB)
+          parted:
+            device: "{{ device_name }}"
+            number: "{{ index }}"
+            state: present
+            part_start: "{{ (index-1) * (item.size_gb/3) }}GB"
+            part_end: "{{ index * (item.size_gb/3) }}GB"
+          loop:
+            - 1
+            - 2
+            - 3
+          loop_control:
+            loop_var: index
+          when: item.size_gb > 10000
+
+        - name: Create physical volumes (for volumes > 10TB)
+          lvol:
+            vg: "vg_{{ item.name }}"
+            pv: "{{ device_name }}1,{{ device_name }}2,{{ device_name }}3"
+          when: item.size_gb > 10000
+
+        - name: Create volume group (for volumes > 10TB)
+          lvg:
+            vg: "vg_{{ item.name }}"
+            pvs: "{{ device_name }}1,{{ device_name }}2,{{ device_name }}3"
+            state: present
+          when: item.size_gb > 10000
+
+        - name: Create logical volume (for volumes > 10TB)
+          lvol:
+            vg: "vg_{{ item.name }}"
+            lv: "lv_{{ item.name }}"
+            size: "100%FREE"
+          when: item.size_gb > 10000
+
+        - name: Create filesystem (for volumes < 10TB)
+          filesystem:
+            fstype: xfs
+            dev: "{{ device_name }}1"
+          when: item.size_gb <= 10000
+
+        - name: Create filesystem (for volumes > 10TB)
+          filesystem:
+            fstype: xfs
+            dev: "/dev/vg_{{ item.name }}/lv_{{ item.name }}"
+          when: item.size_gb > 10000
+
+        - name: Create mount directory
+          file:
+            path: "{{ item.mount }}"
+            state: directory
+            mode: '0755'
+
+        - name: Mount volume (for volumes < 10TB)
+          mount:
+            path: "{{ item.mount }}"
+            src: "{{ device_name }}1"
+            fstype: xfs
+            state: mounted
+          when: item.size_gb <= 10000
+
+        - name: Mount volume (for volumes > 10TB)
+          mount:
+            path: "{{ item.mount }}"
+            src: "/dev/vg_{{ item.name }}/lv_{{ item.name }}"
+            fstype: xfs
+            state: mounted
+          when: item.size_gb > 10000
+
+        - name: Add to fstab (for volumes < 10TB)
+          mount:
+            path: "{{ item.mount }}"
+            src: "{{ device_name }}1"
+            fstype: xfs
+            state: present
+          when: item.size_gb <= 10000
+
+        - name: Add to fstab (for volumes > 10TB)
+          mount:
+            path: "{{ item.mount }}"
+            src: "/dev/vg_{{ item.name }}/lv_{{ item.name }}"
+            fstype: xfs
+            state: present
+          when: item.size_gb > 10000
+      loop: "{{ volumes }}"
+      loop_control:
+        label: "{{ item.name }}"
