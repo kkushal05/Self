@@ -1,0 +1,91 @@
+# Configuring Different Root Logger Levels Based on Profiles in Logback
+
+In Logback, you can configure different root logger levels based on profiles (environments) using one of these approaches:
+
+## 1. Using `<if>`/`<then>` Conditions (Requires Janino Library)
+
+```xml
+<configuration>
+    <!-- Define a property for the environment (can be set via system property) -->
+    <property name="environment" value="${env:-dev}" />
+    
+    <if condition='"prod".equals(property("environment"))'>
+        <then>
+            <root level="WARN">
+                <appender-ref ref="CONSOLE" />
+                <appender-ref ref="FILE" />
+            </root>
+        </then>
+    </if>
+    
+    <if condition='"dev".equals(property("environment"))'>
+        <then>
+            <root level="DEBUG">
+                <appender-ref ref="CONSOLE" />
+            </root>
+        </then>
+    </if>
+    
+    <!-- Default configuration if no profile matches -->
+    <root level="INFO">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</configuration>
+```
+
+## 2. Using Multiple Configuration Files
+
+Create separate files and include them conditionally:
+
+**logback.xml**
+```xml
+<configuration>
+    <include resource="logback-${env:-dev}.xml"/>
+</configuration>
+```
+
+**logback-dev.xml**
+```xml
+<included>
+    <root level="DEBUG">
+        <appender-ref ref="CONSOLE" />
+    </root>
+</included>
+```
+
+**logback-prod.xml**
+```xml
+<included>
+    <root level="WARN">
+        <appender-ref ref="CONSOLE" />
+        <appender-ref ref="FILE" />
+    </root>
+</included>
+```
+
+## 3. Using Spring Profiles (for Spring Boot Applications)
+
+```xml
+<configuration>
+    <springProfile name="dev">
+        <root level="DEBUG">
+            <appender-ref ref="CONSOLE" />
+        </root>
+    </springProfile>
+    
+    <springProfile name="prod">
+        <root level="WARN">
+            <appender-ref ref="CONSOLE" />
+            <appender-ref ref="FILE" />
+        </root>
+    </springProfile>
+</configuration>
+```
+
+## How to Set the Active Profile
+
+1. **System property**: `-Denv=prod` (for approach 1 or 2)
+2. **Spring Boot**: `spring.profiles.active=prod` in application.properties (for approach 3)
+3. **Environment variable**: `export ENV=prod` (then use `${env}` in logback.xml)
+
+Choose the approach that best fits your application's architecture and requirements. The Spring Profile approach is most convenient for Spring Boot applications.
