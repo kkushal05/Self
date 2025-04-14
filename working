@@ -1,3 +1,108 @@
+Here's the updated playbook using `ansible.utils.ipmath` for generating sequential IPv6 addresses:
+
+```yaml
+---
+- name: Allocate sequential IPv6 addresses in OpenStack using ansible.utils.ipmath
+  hosts: localhost
+  gather_facts: false
+  vars:
+    subnet_name: "your-ipv6-subnet"
+    num_addresses: 10
+    starting_address: "2001:db8::100"  # Optional starting point
+
+  tasks:
+    - name: Get subnet information
+      openstack.cloud.subnet_info:
+        name: "{{ subnet_name }}"
+      register: subnet
+
+    - name: Extract subnet details
+      set_fact:
+        subnet_id: "{{ subnet.subnets[0].id }}"
+        cidr: "{{ subnet.subnets[0].cidr }}"
+        allocation_pool_start: "{{ subnet.subnets[0].allocation_pools[0].start }}"
+        allocation_pool_end: "{{ subnet.subnets[0].allocation_pools[0].end }}"
+
+    - name: Get all port information in the subnet
+      openstack.cloud.port_info:
+        network: "{{ subnet.subnets[0].network_id }}"
+      register: all_ports
+
+    - name: Extract all allocated IPv6 addresses
+      set_fact:
+        allocated_ips: "{{ all_ports.ports | map(attribute='fixed_ips') | flatten | selectattr('subnet_id', 'equalto', subnet_id) | map(attribute='ip_address') | list }}"
+
+    - name: Generate sequential IPs using ansible.utils.ipmath
+      ansible.utils.ipmath:
+        address: "{{ starting_address | default(allocation_pool_start) }}"
+        increment: "{{ item }}"
+      register: ip_generator
+      loop: "{{ range(0, num_addresses|int) | list }}"
+
+    - name: Extract generated IPs
+      set_fact:
+        candidate_ips: "{{ ip_generator.results | map(attribute='transformed') | list }}"
+
+    - name: Filter out allocated IPs
+      set_fact:
+        available_ips: "{{ candidate_ips | difference(allocated_ips) }}"
+
+    - name: Verify we have enough available IPs
+      assert:
+        that:
+          - available_ips | length >= num_addresses
+        fail_msg: "Not enough available IPv6 addresses in the subnet"
+        success_msg: "Found {{ available_ips | length }} available IPv6 addresses"
+
+    - name: Select first {{ num_addresses }} available IPs
+      set_fact:
+        selected_ips: "{{ available_ips[0:num_addresses|int] }}"
+
+    - name: Display selected IPs
+      debug:
+        msg: "Selected available IPv6 addresses: {{ selected_ips }}"
+
+    - name: Create ports with selected IPs (optional)
+      openstack.cloud.port:
+        network: "{{ subnet.subnets[0].network_id }}"
+        fixed_ips:
+          - subnet: "{{ subnet_id }}"
+            ip_address: "{{ item }}"
+        state: present
+      loop: "{{ selected_ips }}"
+      when: selected_ips | length > 0
+```
+
+### Key Changes Made:
+
+1. **Replaced the set_fact + ipmath approach** with the dedicated `ansible.utils.ipmath` module
+2. **Improved IP generation**:
+   - Uses a proper filter plugin designed for IP math operations
+   - Handles both IPv4 and IPv6 addresses correctly
+   - Provides better error handling for invalid addresses
+
+3. **Added registration of results**:
+   - Captures output from the ipmath module
+   - Extracts transformed IPs from the results
+
+### Prerequisites Update:
+
+You'll need to install the `ansible.utils` collection:
+
+```bash
+ansible-galaxy collection install ansible.utils
+```
+
+### Advantages of this Approach:
+
+1. **More robust IP address manipulation** - handles edge cases better
+2. **Cleaner task structure** - dedicated module for IP math operations
+3. **Better error reporting** - module provides specific error messages
+4. **Consistent behavior** - uses Ansible's official IP manipulation utilities
+
+The rest of the playbook logic (checking allocated IPs, verifying availability, etc.) remains the same as it wasn't related to the IP math operations.
+
+
 # Ansible Automation for Sequential IPv6 Address Allocation in OpenStack
 
 Here's a comprehensive solution to get 10 sequential IPv6 addresses from a subnet and verify their availability:
