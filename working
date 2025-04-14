@@ -1,0 +1,121 @@
+# Ansible Automation for Sequential IPv6 Address Allocation in OpenStack
+
+Here's a comprehensive solution to get 10 sequential IPv6 addresses from a subnet and verify their availability:
+
+## Complete Playbook
+
+```yaml
+---
+- name: Allocate sequential IPv6 addresses in OpenStack
+  hosts: localhost
+  gather_facts: false
+  vars:
+    subnet_name: "your-ipv6-subnet"
+    num_addresses: 10
+    starting_address: "2001:db8::100"  # Optional starting point
+
+  tasks:
+    - name: Get subnet information
+      openstack.cloud.subnet_info:
+        name: "{{ subnet_name }}"
+      register: subnet
+
+    - name: Extract subnet details
+      set_fact:
+        subnet_id: "{{ subnet.subnets[0].id }}"
+        cidr: "{{ subnet.subnets[0].cidr }}"
+        allocation_pool_start: "{{ subnet.subnets[0].allocation_pools[0].start }}"
+        allocation_pool_end: "{{ subnet.subnets[0].allocation_pools[0].end }}"
+
+    - name: Get all port information in the subnet
+      openstack.cloud.port_info:
+        network: "{{ subnet.subnets[0].network_id }}"
+      register: all_ports
+
+    - name: Extract all allocated IPv6 addresses
+      set_fact:
+        allocated_ips: "{{ all_ports.ports | map(attribute='fixed_ips') | flatten | selectattr('subnet_id', 'equalto', subnet_id) | map(attribute='ip_address') | list }}"
+
+    - name: Generate sequential IPs
+      set_fact:
+        candidate_ips: "{{ candidate_ips | default([]) + [starting_address | ipmath(loop.index)] }}"
+      loop: "{{ range(0, num_addresses|int) | list }}"
+      when: starting_address is defined
+
+    - name: Generate sequential IPs from pool start if no starting address specified
+      set_fact:
+        candidate_ips: "{{ candidate_ips | default([]) + [allocation_pool_start | ipmath(loop.index)] }}"
+      loop: "{{ range(0, num_addresses|int) | list }}"
+      when: starting_address is not defined
+
+    - name: Filter out allocated IPs
+      set_fact:
+        available_ips: "{{ candidate_ips | difference(allocated_ips) }}"
+
+    - name: Verify we have enough available IPs
+      assert:
+        that:
+          - available_ips | length >= num_addresses
+        fail_msg: "Not enough available IPv6 addresses in the subnet"
+        success_msg: "Found {{ available_ips | length }} available IPv6 addresses"
+
+    - name: Select first {{ num_addresses }} available IPs
+      set_fact:
+        selected_ips: "{{ available_ips[0:num_addresses|int] }}"
+
+    - name: Display selected IPs
+      debug:
+        msg: "Selected available IPv6 addresses: {{ selected_ips }}"
+
+    - name: Create ports with selected IPs (optional)
+      openstack.cloud.port:
+        network: "{{ subnet.subnets[0].network_id }}"
+        fixed_ips:
+          - subnet: "{{ subnet_id }}"
+            ip_address: "{{ item }}"
+        state: present
+      loop: "{{ selected_ips }}"
+      when: selected_ips | length > 0
+```
+
+## Key Components Explained
+
+1. **Subnet Information Retrieval**:
+   - Gets details about the specified IPv6 subnet including allocation pools
+
+2. **Port Information Collection**:
+   - Fetches all existing ports in the network to identify allocated IPs
+
+3. **IP Generation**:
+   - Uses `ipmath` filter to generate sequential addresses
+   - Supports both specified starting address and automatic pool start
+
+4. **Availability Check**:
+   - Compares generated IPs against allocated IPs
+   - Ensures requested number of addresses are available
+
+5. **Port Creation (Optional)**:
+   - Creates ports with the selected IPs to reserve them
+
+## Prerequisites
+
+1. Install required collections:
+```bash
+ansible-galaxy collection install openstack.cloud
+```
+
+2. Configure OpenStack credentials (either via `clouds.yaml` or environment variables)
+
+3. Install required Python packages:
+```bash
+pip install openstacksdk netaddr
+```
+
+## Customization Options
+
+- To use a specific starting address, set `starting_address`
+- To change the number of addresses, modify `num_addresses`
+- To skip port creation, remove the last task
+- To verify IPs without reserving them, remove the port creation task
+
+Would you like me to modify any part of this solution to better fit your specific requirements?
