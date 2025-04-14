@@ -1,3 +1,139 @@
+Here's the modified playbook that prioritizes finding sequential IPv6 addresses but will accept any available addresses if enough sequential ones aren't available:
+
+```yaml
+---
+- name: Allocate available IPv6 addresses in OpenStack
+  hosts: localhost
+  gather_facts: false
+  vars:
+    subnet_name: "your-ipv6-subnet"
+    num_addresses: 10
+    prefer_sequential: true  # Set to false if sequential doesn't matter
+
+  tasks:
+    - name: Get subnet information
+      openstack.cloud.subnet_info:
+        name: "{{ subnet_name }}"
+      register: subnet
+
+    - name: Extract subnet details
+      set_fact:
+        subnet_id: "{{ subnet.subnets[0].id }}"
+        network_id: "{{ subnet.subnets[0].network_id }}"
+        cidr: "{{ subnet.subnets[0].cidr }}"
+        pool_start: "{{ subnet.subnets[0].allocation_pools[0].start }}"
+        pool_end: "{{ subnet.subnets[0].allocation_pools[0].end }}"
+
+    - name: Get all allocated IPs in subnet
+      openstack.cloud.port_info:
+        network: "{{ network_id }}"
+      register: all_ports
+    - set_fact:
+        allocated_ips: "{{ all_ports.ports | map(attribute='fixed_ips') | flatten | selectattr('subnet_id', 'equalto', subnet_id) | map(attribute='ip_address') | list }}"
+
+    - name: Find available sequential block (when preferred)
+      block:
+        - name: Generate all possible IPs in subnet
+          ansible.utils.ip_range:
+            start: "{{ pool_start }}"
+            end: "{{ pool_end }}"
+          register: all_possible_ips
+
+        - name: Find first available sequential block
+          set_fact:
+            sequential_block: |
+              {% set available = [] %}
+              {% for ip in all_possible_ips.range %}
+                {% if ip not in allocated_ips %}
+                  {% set _ = available.append(ip) %}
+                  {% if available|length >= num_addresses|int %}
+                    {{ available[0:num_addresses|int] }}
+                    {% break %}
+                  {% endif %}
+                {% else %}
+                  {% set _ = available.clear() %}
+                {% endif %}
+              {% endfor %}
+          when: prefer_sequential
+
+    - name: Set final IP selection
+      set_fact:
+        selected_ips: |
+          {% if prefer_sequential and sequential_block is defined and sequential_block|length >= num_addresses|int %}
+            {{ sequential_block[0:num_addresses|int] }}
+          {% else %}
+            {# Fallback to any available IPs #}
+            {{ (all_possible_ips.range | difference(allocated_ips))[0:num_addresses|int] }}
+          {% endif %}
+
+    - name: Verify enough IPs are available
+      assert:
+        that:
+          - selected_ips | length == num_addresses|int
+        fail_msg: "Could not find {{ num_addresses }} available IPv6 addresses in subnet"
+        success_msg: "Found {{ selected_ips | length }} available IPv6 addresses"
+
+    - name: Display selected IPs
+      debug:
+        msg: >
+          Selected IPs ({{ 'Sequential' if selected_ips == sequential_block[0:num_addresses|int] else 'Non-sequential' }}):
+          {{ selected_ips | join(', ') }}
+
+    - name: Reserve the IPs by creating ports
+      openstack.cloud.port:
+        network: "{{ network_id }}"
+        fixed_ips:
+          - subnet: "{{ subnet_id }}"
+            ip_address: "{{ item }}"
+        state: present
+      loop: "{{ selected_ips }}"
+```
+
+### Key Improvements:
+
+1. **Flexible IP Selection**:
+   - First tries to find sequential blocks when `prefer_sequential: true`
+   - Falls back to any available IPs if sequential block isn't found
+   - Clearly indicates whether the returned IPs are sequential
+
+2. **Better Performance**:
+   - Uses `ansible.utils.ip_range` to generate all possible IPs once
+   - More efficient scanning for sequential blocks
+
+3. **Enhanced Reporting**:
+   - Clearly shows whether the selected IPs are sequential or not
+   - Better error messaging
+
+4. **Configurable Behavior**:
+   - Set `prefer_sequential: false` if you don't care about ordering
+   - Easy to adjust the number of needed addresses
+
+### Usage Examples:
+
+1. **Strictly sequential preferred**:
+```yaml
+vars:
+  prefer_sequential: true
+  num_addresses: 10
+```
+
+2. **Any available IPs acceptable**:
+```yaml
+vars:
+  prefer_sequential: false
+  num_addresses: 10
+```
+
+The playbook will automatically handle either case while providing clear feedback about what was allocated.
+
+
+
+
+
+
+
+
+
 Here's the updated playbook using `ansible.utils.ipmath` for generating sequential IPv6 addresses:
 
 ```yaml
